@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>达人资源匹配系统</title>
+<link rel="stylesheet" href="css/style.css?v=3" />
+</head>
+<body>
+<div id="app" v-cloak>
+  <div class="app-shell">
+    <!-- ============ 侧边导航 ============ -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">IRM</div>
+        <div class="brand-text">
+          <div class="brand-title">达人资源匹配</div>
+          <div class="brand-sub">本地生活达人库</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item" :class="{active: state.view==='library'}" @click="switchView('library')">
+          <span class="nav-ic">▣</span><span>达人库</span>
+        </button>
+        <button class="nav-item" :class="{active: state.view==='filter'}" @click="switchView('filter')">
+          <span class="nav-ic">◌</span><span>智能筛选</span>
+        </button>
+        <button class="nav-item" :class="{active: state.view==='match'}" @click="switchView('match')">
+          <span class="nav-ic">★</span><span>项目匹配</span>
+        </button>
+        <button class="nav-item" :class="{active: state.view==='compare'}" @click="switchView('compare')">
+          <span class="nav-ic">⇄</span><span>达人对比</span>
+          <span class="nav-badge" v-if="compareList.length">{{ compareList.length }}</span>
+        </button>
+        <button class="nav-item" :class="{active: state.view==='favorites'}" @click="switchView('favorites')">
+          <span class="nav-ic">♡</span><span>收藏夹</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-stats">
+        <div class="stat-row"><span>库内达人</span><strong>{{ stats.total }}</strong></div>
+        <div class="stat-row"><span>抖音</span><strong>{{ stats.douyin }}</strong></div>
+        <div class="stat-row"><span>小红书</span><strong>{{ stats.xhs }}</strong></div>
+        <div class="stat-row"><span>头部/顶流</span><strong>{{ stats.head }}</strong></div>
+        <div class="stat-row warn" v-if="stats.avoid"><span>避雷达人</span><strong>{{ stats.avoid }}</strong></div>
+      </div>
+
+      <div class="sidebar-foot">
+        <button class="btn-mini ghost" @click="downloadTemplate">下载导入模板</button>
+      </div>
+    </aside>
+
+    <!-- ============ 主内容区 ============ -->
+    <main class="main">
+      <!-- 顶部栏 -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 class="topbar-title">
+            <template v-if="state.view==='library'">达人库管理</template>
+            <template v-else-if="state.view==='filter'">智能筛选匹配</template>
+            <template v-else-if="state.view==='match'">项目匹配推荐</template>
+            <template v-else-if="state.view==='compare'">达人对比</template>
+            <template v-else-if="state.view==='favorites'">收藏夹</template>
+          </h1>
+          <span class="topbar-count" v-if="state.view==='library' || state.view==='filter'">
+            <template v-if="state.view==='library'">
+              <span v-if="state.search && libraryInfluencers.length !== state.influencers.length">
+                搜索命中 {{ libraryInfluencers.length }} / 库内 {{ state.influencers.length }}
+              </span>
+              <span v-else>共 {{ state.influencers.length }} 位</span>
+            </template>
+            <template v-else-if="state.view==='filter'">
+              <span v-if="state.influencers.length !== filteredInfluencers.length">
+                筛选结果 {{ filteredInfluencers.length }} / 库内 {{ state.influencers.length }}
+              </span>
+              <span v-else>共 {{ filteredInfluencers.length }} 位</span>
+            </template>
+          </span>
+        </div>
+        <div class="topbar-right">
+          <!-- 导入导出 -->
+          <label class="btn primary">
+            <input type="file" accept=".xlsx,.xls,.csv" @change="triggerImport" hidden />
+            导入 Excel
+          </label>
+          <button class="btn" @click="exportCurrent" v-if="state.view==='library' || state.view==='filter'">导出结果</button>
+          <button class="btn ghost" @click="downloadTemplate">下载模板</button>
+          <button class="btn danger ghost" v-if="state.view==='library' && state.influencers.length" @click="clearAllInfluencers">🗑 清空库</button>
+        </div>
+      </header>
+
+      <div class="view-body">
+
+        <!-- ============ 达人库视图 ============ -->
+        <section v-if="state.view==='library'" class="view library-view">
+          <div class="toolbar">
+            <div class="search-box">
+              <span class="search-ic">⌕</span>
+              <input type="text" v-model="state.search" placeholder="搜索昵称/城市/赛道/案例/备注…" />
+            </div>
+            <div class="view-switch">
+              <button :class="{active: state.viewMode==='card'}" @click="setViewMode('card')">卡片</button>
+              <button :class="{active: state.viewMode==='list'}" @click="setViewMode('list')">列表</button>
+            </div>
+          </div>
+
+          <!-- 卡片视图 -->
+          <div class="card-grid" v-if="state.viewMode==='card'">
+            <div class="inf-card" v-for="inf in libraryInfluencers" :key="inf.id" :class="{selected: state.selectedIds.includes(inf.id)}" @click="openDetail(inf.id)">
+              <label class="card-check" @click.stop :title="'选中 '+inf.nickname">
+                <input type="checkbox" :checked="state.selectedIds.includes(inf.id)" @change="toggleSelect(inf.id)" />
+                <span class="check-mark"></span>
+              </label>
+              <div class="inf-card-head">
+                <span class="platform-tag" :class="platformClass(inf.platform)">{{ inf.platform || '未填' }}</span>
+                <span class="tier-badge" :class="tierClass(inf.tier)">{{ inf.tier || '未分级' }}</span>
+                <span class="avoid-tag" v-if="inf.avoid">避雷</span>
+              </div>
+              <div class="inf-name">{{ inf.nickname || '未命名' }}</div>
+              <div class="inf-meta">
+                <span>📍 {{ inf.city || '-' }}</span>
+                <span>🎯 {{ inf.track || '-' }}</span>
+              </div>
+              <div class="inf-stats">
+                <div class="mini-stat"><label>粉丝</label><span>{{ fmtNum(inf.followers) }}</span></div>
+                <div class="mini-stat"><label>水下报价</label><span>{{ fmtPrice(inf.pricePrivate) }}</span></div>
+                <div class="mini-stat"><label>互动率</label><span>{{ fmtPct(inf.engagementRate) }}</span></div>
+              </div>
+              <div class="inf-tags" v-if="inf.tags && inf.tags.length">
+                <span class="tag" v-for="t in inf.tags" :key="t">{{ t }}</span>
+              </div>
+              <div class="inf-card-foot" @click.stop>
+                <button class="card-act" @click="toggleCompare(inf.id)" :class="{active: state.compareIds.includes(inf.id)}">对比</button>
+                <button class="card-act" @click="toggleListSelect(inf.id)" :class="{active: state.listIds.includes(inf.id)}">加入清单</button>
+                <a class="card-act link" v-if="inf.homepage" :href="inf.homepage" target="_blank" rel="noopener">主页 ↗</a>
+              </div>
+            </div>
+            <div class="empty" v-if="!libraryInfluencers.length">
+              <div class="empty-ic">📭</div>
+              <p>暂无达人数据，点击右上角「导入 Excel」或下载模板填写后导入</p>
+              <div class="empty-actions" v-if="!state.influencers.length">
+                <button class="btn" @click="reseedInfluencers">恢复示例数据（15 位）</button>
+              </div>
+              <div class="empty-actions" v-else>
+                <p class="muted">当前搜索无达人，<button class="link-btn" @click="state.search=''">清空搜索试试</button>，或 <button class="link-btn" @click="clearAllInfluencers">一键清空</button></p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表视图 -->
+          <div class="list-wrap" v-else>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="th-check"><input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll" title="全选/取消" /></th>
+                  <th @click="setSort('nickname')">达人昵称</th>
+                  <th>平台</th>
+                  <th>城市</th>
+                  <th>层级</th>
+                  <th>核心赛道</th>
+                  <th>风格/标签</th>
+                  <th>微信号</th>
+                  <th @click="setSort('followers')">粉丝量</th>
+                  <th @click="setSort('price')">报价(水下)</th>
+                  <th @click="setSort('engagementRate')">互动率</th>
+                  <th>主页</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="inf in libraryInfluencers" :key="inf.id" :class="{avoid: inf.avoid, selected: state.selectedIds.includes(inf.id)}">
+                  <td class="td-check" @click.stop><input type="checkbox" :checked="state.selectedIds.includes(inf.id)" @change="toggleSelect(inf.id)" /></td>
+                  <td class="strong">
+                    <span class="avoid-dot" v-if="inf.avoid" title="避雷">!</span>
+                    {{ inf.nickname || '未命名' }}
+                  </td>
+                  <td><span class="platform-tag sm" :class="platformClass(inf.platform)">{{ inf.platform || '-' }}</span></td>
+                  <td>{{ inf.city || '-' }}</td>
+                  <td><span class="tier-badge sm" :class="tierClass(inf.tier)">{{ inf.tier || '-' }}</span></td>
+                  <td>{{ inf.track || '-' }}</td>
+                  <td class="cell-tags">
+                    <span class="mini-tag" v-if="inf.style">{{ inf.style }}</span>
+                    <span class="mini-tag" v-for="t in (inf.tags||[])" :key="t">{{ t }}</span>
+                    <span v-if="!inf.style && !(inf.tags||[]).length">-</span>
+                  </td>
+                  <td>{{ inf.wechat || '-' }}</td>
+                  <td>{{ fmtNum(inf.followers) }}</td>
+                  <td>{{ fmtPrice(inf.pricePrivate) }}</td>
+                  <td>{{ fmtPct(inf.engagementRate) }}</td>
+                  <td>
+                    <a v-if="inf.homepage" :href="inf.homepage" target="_blank" rel="noopener" class="hp-link" :title="inf.homepage">↗ 打开</a>
+                    <span v-else>-</span>
+                  </td>
+                  <td class="actions">
+                    <button class="btn-xs" @click="openDetail(inf.id)">详情</button>
+                    <button class="btn-xs" @click="toggleCompare(inf.id)" :class="{active: state.compareIds.includes(inf.id)}">对比</button>
+                  </td>
+                </tr>
+                <tr v-if="!libraryInfluencers.length"><td colspan="13" class="empty-cell">暂无数据</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ============ 智能筛选视图 ============ -->
+        <section v-else-if="state.view==='filter'" class="view filter-view">
+          <div class="filter-layout">
+            <!-- 筛选面板 -->
+            <aside class="filter-panel">
+              <div class="filter-panel-head">
+                <span>筛选条件</span>
+                <button class="link-btn" @click="resetFilters">重置</button>
+              </div>
+
+              <div class="filter-group">
+                <label class="filter-label">平台</label>
+                <div class="chip-row">
+                  <button class="chip" v-for="p in platformOptions" :key="p" :class="{active: state.filters.platforms.includes(p)}" @click="toggleArr(state.filters.platforms, p)">{{ p }}</button>
+                </div>
+              </div>
+
+              <div class="filter-group">
+                <label class="filter-label">城市</label>
+                <div class="chip-row">
+                  <button class="chip" v-for="c in cityOptions" :key="c" :class="{active: state.filters.cities.includes(c)}" @click="toggleArr(state.filters.cities, c)">{{ c }}</button>
+                </div>
+              </div>
+
+              <div class="filter-group">
+                <label class="filter-label">达人层级</label>
+                <div class="chip-row">
+                  <button class="chip" v-for="t in tierOptions" :key="t" :class="{active: state.filters.tiers.includes(t)}" @click="toggleArr(state.filters.tiers, t)">{{ t }}</button>
+                </div>
+              </div>
+
+              <div class="filter-group">
+                <label class="filter-label">核心赛道</label>
+                <div class="chip-row">
+                  <button class="chip" v-for="t in trackOptions" :key="t" :class="{active: state.filters.tracks.includes(t)}" @click="toggleArr(state.filters.tracks, t)">{{ t }}</button>
+                </div>
+              </div>
+
+              <div class="filter-group">
+                <label class="filter-label">内容风格关键词</label>
+                <input type="text" class="input" v-model="state.filters.style" placeholder="如：探店测评" />
+              </div>
+
+              <div class="filter-group">
+                <label class="filter-label">报价区间（水下/元）</label>
+                <div class="range-row">
+                  <input type="number" class="input" v-model.number="state.filters.priceMin" placeholder="最低" />
+                  <span class="dash">~</span>
+                  <input type="number" class="input" v-model.number="state.filters.priceMax" placeholder="最高" />
+                </div>
+              </div>
+
+              <div class="filter-group">
+                <label class="filter-check">
+                  <input type="checkbox" v-model="state.filters.excludeAvoid" />
+                  <span>排除避雷达人</span>
+                </label>
+                <button class="btn-mini warn full" v-if="!state.filters.excludeAvoid" @click="excludeAvoidOneShot">一键排除避雷</button>
+              </div>
+
+              <div class="filter-group">
+                <label class="filter-label">排序</label>
+                <select class="input" v-model="state.sortKey">
+                  <option value="">默认</option>
+                  <option value="followers">粉丝量</option>
+                  <option value="price">报价</option>
+                  <option value="engagementRate">互动率</option>
+                  <option value="gmv">成交GMV</option>
+                  <option value="matchScore">匹配度</option>
+                </select>
+                <div class="dir-toggle">
+                  <button :class="{active: state.sortDir==='desc'}" @click="state.sortDir='desc'">降序</button>
+                  <button :class="{active: state.sortDir==='asc'}" @click="state.sortDir='asc'">升序</button>
+                </div>
+              </div>
+            </aside>
+
+            <!-- 结果区 -->
+            <div class="filter-results">
+              <div class="toolbar inline">
+                <div class="search-box">
+                  <span class="search-ic">⌕</span>
+                  <input type="text" v-model="state.search" placeholder="全局关键词搜索…" />
+                </div>
+                <div class="result-count">结果 {{ filteredInfluencers.length }} / {{ stats.total }}</div>
+                <div class="view-switch">
+                  <button :class="{active: state.viewMode==='card'}" @click="setViewMode('card')">卡片</button>
+                  <button :class="{active: state.viewMode==='list'}" @click="setViewMode('list')">列表</button>
+                </div>
+              </div>
+
+              <div class="card-grid compact" v-if="state.viewMode==='card'">
+                <div class="inf-card" v-for="inf in filteredInfluencers" :key="inf.id" @click="openDetail(inf.id)">
+                  <div class="inf-card-head">
+                    <span class="platform-tag" :class="platformClass(inf.platform)">{{ inf.platform || '未填' }}</span>
+                    <span class="tier-badge" :class="tierClass(inf.tier)">{{ inf.tier || '-' }}</span>
+                    <span class="avoid-tag" v-if="inf.avoid">避雷</span>
+                  </div>
+                  <div class="inf-name">{{ inf.nickname || '未命名' }}</div>
+                  <div class="inf-meta"><span>📍 {{ inf.city || '-' }}</span><span>🎯 {{ inf.track || '-' }}</span></div>
+                  <div class="inf-stats">
+                    <div class="mini-stat"><label>粉丝</label><span>{{ fmtNum(inf.followers) }}</span></div>
+                    <div class="mini-stat"><label>水下报价</label><span>{{ fmtPrice(inf.pricePrivate) }}</span></div>
+                    <div class="mini-stat"><label>互动率</label><span>{{ fmtPct(inf.engagementRate) }}</span></div>
+                  </div>
+                  <div class="inf-card-foot" @click.stop>
+                    <button class="card-act" @click="toggleCompare(inf.id)" :class="{active: state.compareIds.includes(inf.id)}">对比</button>
+                    <a class="card-act link" v-if="inf.homepage" :href="inf.homepage" target="_blank" rel="noopener">主页 ↗</a>
+                  </div>
+                </div>
+                <div class="empty" v-if="!filteredInfluencers.length"><p>无匹配结果，请调整筛选条件</p></div>
+              </div>
+
+              <div class="list-wrap" v-else>
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>达人昵称</th><th>平台</th><th>城市</th><th>层级</th><th>赛道</th>
+                      <th>粉丝量</th><th>报价</th><th>互动率</th><th>GMV</th><th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="inf in filteredInfluencers" :key="inf.id" :class="{avoid: inf.avoid}">
+                      <td class="strong"><a v-if="inf.homepage" :href="inf.homepage" target="_blank" rel="noopener" class="name-link">{{ inf.nickname }}</a><span v-else>{{ inf.nickname }}</span></td>
+                      <td><span class="platform-tag sm" :class="platformClass(inf.platform)">{{ inf.platform }}</span></td>
+                      <td>{{ inf.city }}</td><td><span class="tier-badge sm" :class="tierClass(inf.tier)">{{ inf.tier }}</span></td>
+                      <td>{{ inf.track }}</td><td>{{ fmtNum(inf.followers) }}</td><td>{{ fmtPrice(inf.pricePrivate) }}</td>
+                      <td>{{ fmtPct(inf.engagementRate) }}</td><td>{{ fmtNum(inf.gmv) }}</td>
+                      <td class="actions"><button class="btn-xs" @click="openDetail(inf.id)">详情</button><button class="btn-xs" @click="toggleCompare(inf.id)">对比</button></td>
+                    </tr>
+                    <tr v-if="!filteredInfluencers.length"><td colspan="10" class="empty-cell">无匹配结果</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 项目匹配视图 ============ -->
+        <section v-else-if="state.view==='match'" class="view match-view">
+          <div class="match-layout">
+            <!-- 需求表单 -->
+            <aside class="match-form">
+              <h3 class="form-title">项目需求</h3>
+              <div class="form-group">
+                <label>项目名称</label>
+                <input type="text" class="input" v-model="state.projectReq.name" placeholder="如：XX餐饮沪上推广" />
+              </div>
+              <div class="form-group">
+                <label>项目类型</label>
+                <div class="chip-row">
+                  <button class="chip" v-for="t in projectTypeOptions" :key="t" :class="{active: state.projectReq.projectType===t}" @click="state.projectReq.projectType=t">{{ t }}</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>投放平台</label>
+                <div class="chip-row">
+                  <button class="chip" v-for="p in platformOptions" :key="p" :class="{active: state.projectReq.platforms.includes(p)}" @click="toggleArr(state.projectReq.platforms, p)">{{ p }}</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>推广城市</label>
+                <div class="chip-row">
+                  <button class="chip" v-for="c in cityOptions" :key="c" :class="{active: state.projectReq.cities.includes(c)}" @click="toggleArr(state.projectReq.cities, c)">{{ c }}</button>
+                </div>
+                <div class="inline-input">
+                  <input type="text" class="input sm" v-model="newCity" placeholder="自定义城市" @keydown.enter.prevent="addProjectCity" />
+                  <button class="btn-mini" @click="addProjectCity">+</button>
+                </div>
+                <div class="selected-chips" v-if="state.projectReq.cities.length">
+                  <span class="chip-tag" v-for="c in state.projectReq.cities" :key="c">{{ c }} <i @click="toggleArr(state.projectReq.cities, c)">×</i></span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>预算范围（元）</label>
+                <div class="range-row">
+                  <input type="number" class="input" v-model.number="state.projectReq.budgetMin" placeholder="最低" />
+                  <span class="dash">~</span>
+                  <input type="number" class="input" v-model.number="state.projectReq.budgetMax" placeholder="最高" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label>需要达人数量</label>
+                <input type="number" class="input" min="1" v-model.number="state.projectReq.count" />
+              </div>
+              <div class="form-group">
+                <label class="filter-check">
+                  <input type="checkbox" v-model="state.projectReq.excludeAvoid" />
+                  <span>排除避雷达人</span>
+                </label>
+              </div>
+              <button class="btn primary full big" @click="runMatch">🚀 开始匹配</button>
+
+              <div class="saved-projects" v-if="state.savedProjects.length">
+                <div class="sp-title">已存清单</div>
+                <div class="sp-item" v-for="p in state.savedProjects" :key="p.id">
+                  <div class="sp-info" @click="loadProject(p)">
+                    <div class="sp-name">{{ p.name }}</div>
+                    <div class="sp-meta">{{ p.req.projectType }} · {{ (p.req.cities||[]).join('/') || '不限' }} · {{ p.infIds.length }}位</div>
+                  </div>
+                  <button class="btn-xs danger" @click="deleteProject(p.id)">删</button>
+                </div>
+              </div>
+            </aside>
+
+            <!-- 匹配结果 -->
+            <div class="match-results">
+              <div class="match-toolbar" v-if="state.matchRun">
+                <div class="result-count">推荐 {{ state.matchResults.length }} 位 · 已选 {{ state.listIds.length }} 位</div>
+                <div class="quick-select">
+                  <span>快速选：</span>
+                  <button class="btn-mini" @click="selectTopN(3)">前3</button>
+                  <button class="btn-mini" @click="selectTopN(5)">前5</button>
+                  <button class="btn-mini" @click="selectTopN(10)">前10</button>
+                  <button class="btn-mini ghost" @click="state.listIds=[]">清空</button>
+                </div>
+                <div class="match-actions">
+                  <button class="btn" @click="exportProjectList" :disabled="!state.listIds.length">导出清单</button>
+                  <button class="btn primary" @click="saveProjectList" :disabled="!state.listIds.length">保存清单</button>
+                </div>
+              </div>
+
+              <div class="match-empty" v-if="!state.matchRun">
+                <div class="empty-ic">🎯</div>
+                <p>填写左侧项目需求后点击「开始匹配」</p>
+                <p class="muted">系统将按平台、城市、赛道、预算等维度自动评分推荐达人</p>
+              </div>
+
+              <div class="match-list" v-else>
+                <div class="match-row" v-for="r in state.matchResults" :key="r.influencer.id">
+                  <label class="check-cell" @click.stop>
+                    <input type="checkbox" :checked="state.listIds.includes(r.influencer.id)" @change="toggleListSelect(r.influencer.id)" />
+                  </label>
+                  <div class="match-score-col">
+                    <div class="score-ring" :class="scoreLevel(r.matchScore).cls">
+                      <span>{{ r.matchScore }}</span>
+                    </div>
+                    <div class="score-label" :class="scoreLevel(r.matchScore).cls">{{ scoreLevel(r.matchScore).label }}</div>
+                  </div>
+                  <div class="match-inf" @click="openDetail(r.influencer.id)">
+                    <div class="match-inf-head">
+                      <span class="platform-tag sm" :class="platformClass(r.influencer.platform)">{{ r.influencer.platform }}</span>
+                      <span class="match-name">{{ r.influencer.nickname }}</span>
+                      <span class="tier-badge sm" :class="tierClass(r.influencer.tier)">{{ r.influencer.tier }}</span>
+                      <span class="avoid-tag" v-if="r.influencer.avoid">避雷</span>
+                    </div>
+                    <div class="match-inf-meta">
+                      <span>📍 {{ r.influencer.city || '-' }}</span>
+                      <span>🎯 {{ r.influencer.track || '-' }}</span>
+                      <span>👥 {{ fmtNum(r.influencer.followers) }}</span>
+                      <span>💰 {{ fmtPrice(r.influencer.pricePrivate) }}</span>
+                      <span>📊 {{ fmtPct(r.influencer.engagementRate) }}</span>
+                      <span v-if="r.influencer.gmv">🛒 {{ fmtNum(r.influencer.gmv) }}</span>
+                    </div>
+                    <div class="match-reason">{{ r.matchReason }}</div>
+                  </div>
+                  <div class="match-row-act" @click.stop>
+                    <button class="btn-xs" @click="toggleCompare(r.influencer.id)" :class="{active: state.compareIds.includes(r.influencer.id)}">对比</button>
+                    <a class="btn-xs link" v-if="r.influencer.homepage" :href="r.influencer.homepage" target="_blank" rel="noopener">主页 ↗</a>
+                  </div>
+                </div>
+                <div class="empty" v-if="!state.matchResults.length"><p>未匹配到可对接达人，请调整需求</p></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 对比视图 ============ -->
+        <section v-else-if="state.view==='compare'" class="view compare-view">
+          <div class="compare-empty" v-if="!compareList.length">
+            <div class="empty-ic">⇄</div>
+            <p>还未添加对比达人</p>
+            <p class="muted">在达人库或筛选结果中点击「对比」按钮添加（最多4位）</p>
+            <button class="btn primary" @click="switchView('library')">去达人库选择</button>
+          </div>
+          <div class="compare-table-wrap" v-else>
+            <div class="compare-hint">已选 {{ compareList.length }}/4 位，点击表头可移除</div>
+            <table class="compare-table">
+              <tbody>
+                <tr>
+                  <th class="cmp-label"> </th>
+                  <th v-for="inf in compareList" :key="inf.id" class="cmp-name-col">
+                    <div class="cmp-name">{{ inf.nickname }}</div>
+                    <button class="cmp-remove" @click="removeFromCompare(inf.id)">×移除</button>
+                  </th>
+                </tr>
+                <tr><td class="cmp-label">所属平台</td><td v-for="inf in compareList" :key="inf.id"><span class="platform-tag sm" :class="platformClass(inf.platform)">{{ inf.platform }}</span></td></tr>
+                <tr><td class="cmp-label">常驻城市</td><td v-for="inf in compareList" :key="inf.id">{{ inf.city || '-' }}</td></tr>
+                <tr><td class="cmp-label">达人层级</td><td v-for="inf in compareList" :key="inf.id"><span class="tier-badge sm" :class="tierClass(inf.tier)">{{ inf.tier }}</span></td></tr>
+                <tr><td class="cmp-label">核心赛道</td><td v-for="inf in compareList" :key="inf.id">{{ inf.track || '-' }}</td></tr>
+                <tr><td class="cmp-label">内容风格</td><td v-for="inf in compareList" :key="inf.id">{{ inf.style || '-' }}</td></tr>
+                <tr><td class="cmp-label">特殊属性</td><td v-for="inf in compareList" :key="inf.id"><span class="tag" v-for="t in (inf.tags||[])" :key="t">{{ t }}</span><span v-if="!(inf.tags||[]).length">-</span></td></tr>
+                <tr class="hl"><td class="cmp-label">粉丝量级</td><td v-for="inf in compareList" :key="inf.id">{{ fmtNum(inf.followers) }}</td></tr>
+                <tr class="hl"><td class="cmp-label">水上报价</td><td v-for="inf in compareList" :key="inf.id">{{ fmtPrice(inf.pricePublic) }}</td></tr>
+                <tr class="hl"><td class="cmp-label">水下报价</td><td v-for="inf in compareList" :key="inf.id">{{ fmtPrice(inf.pricePrivate) }}</td></tr>
+                <tr class="hl"><td class="cmp-label">合作模式</td><td v-for="inf in compareList" :key="inf.id">{{ inf.coopMode || '-' }}</td></tr>
+                <tr><td class="cmp-label">近30天投稿</td><td v-for="inf in compareList" :key="inf.id">{{ inf.posts30d || '-' }}</td></tr>
+                <tr><td class="cmp-label">总播放/阅读量</td><td v-for="inf in compareList" :key="inf.id">{{ fmtNum(inf.totalViews) }}</td></tr>
+                <tr><td class="cmp-label">近30天总互动数</td><td v-for="inf in compareList" :key="inf.id">{{ fmtNum(inf.interactions30d) }}</td></tr>
+                <tr class="hl"><td class="cmp-label">互动率</td><td v-for="inf in compareList" :key="inf.id">{{ fmtPct(inf.engagementRate) }}</td></tr>
+                <tr class="hl"><td class="cmp-label">成交GMV</td><td v-for="inf in compareList" :key="inf.id">{{ fmtNum(inf.gmv) }}</td></tr>
+                <tr><td class="cmp-label">是否开通蒲公英</td><td v-for="inf in compareList" :key="inf.id"><span v-if="inf.pugongyingEnabled" class="tag ok-tag">已开通</span><span v-else>-</span></td></tr>
+                <tr><td class="cmp-label">是否避雷</td><td v-for="inf in compareList" :key="inf.id"><span :class="inf.avoid?'avoid-tag':'ok-tag'">{{ inf.avoid?'是':'否' }}</span></td></tr>
+                <tr><td class="cmp-label">合作备注</td><td v-for="inf in compareList" :key="inf.id" class="cmp-note">{{ inf.coopNote || '-' }}</td></tr>
+                <tr><td class="cmp-label">主页</td><td v-for="inf in compareList" :key="inf.id"><a v-if="inf.homepage" :href="inf.homepage" target="_blank" rel="noopener" class="name-link">访问 ↗</a><span v-else>-</span></td></tr>
+              </tbody>
+            </table>
+            <div class="compare-foot">
+              <button class="btn" @click="exportCompare">导出对比表</button>
+              <button class="btn ghost" @click="clearCompare">清空对比</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 收藏夹视图 ============ -->
+        <section v-else-if="state.view==='favorites'" class="view favorites-view">
+          <div class="fav-layout">
+            <aside class="fav-panel">
+              <div class="fav-head">
+                <span>收藏分组</span>
+                <button class="btn-mini primary" @click="addFavoriteGroup">+ 新建</button>
+              </div>
+              <div class="fav-group-list">
+                <button class="fav-group" v-for="g in state.favoriteGroups" :key="g.id" :class="{active: state.activeFavGroup===g.id}" @click="state.activeFavGroup=g.id">
+                  <span class="fg-name">♡ {{ g.name }}</span>
+                  <span class="fg-count">{{ (g.infIds||[]).length }}</span>
+                  <span class="fg-del" @click.stop="deleteFavGroup(g.id)">×</span>
+                </button>
+                <div class="empty small" v-if="!state.favoriteGroups.length"><p>暂无分组，点击新建</p></div>
+              </div>
+            </aside>
+            <div class="fav-results">
+              <div class="fav-tip" v-if="!state.activeFavGroup">← 请选择或新建一个收藏分组</div>
+              <template v-else>
+                <div class="fav-bar">
+                  <div class="result-count">共 {{ favGroupInfluencers.length }} 位</div>
+                  <button class="btn" @click="exportFavGroup" :disabled="!favGroupInfluencers.length">导出该组</button>
+                </div>
+                <div class="card-grid compact" v-if="favGroupInfluencers.length">
+                  <div class="inf-card" v-for="inf in favGroupInfluencers" :key="inf.id" @click="openDetail(inf.id)">
+                    <div class="inf-card-head">
+                      <span class="platform-tag" :class="platformClass(inf.platform)">{{ inf.platform }}</span>
+                      <span class="tier-badge" :class="tierClass(inf.tier)">{{ inf.tier }}</span>
+                    </div>
+                    <div class="inf-name">{{ inf.nickname }}</div>
+                    <div class="inf-meta"><span>📍 {{ inf.city }}</span><span>🎯 {{ inf.track }}</span></div>
+                    <div class="inf-stats">
+                      <div class="mini-stat"><label>粉丝</label><span>{{ fmtNum(inf.followers) }}</span></div>
+                      <div class="mini-stat"><label>水下报价</label><span>{{ fmtPrice(inf.pricePrivate) }}</span></div>
+                    </div>
+                    <div class="inf-card-foot" @click.stop>
+                      <button class="card-act active" @click="toggleFav(state.activeFavGroup, inf.id)">取消收藏</button>
+                      <a class="card-act link" v-if="inf.homepage" :href="inf.homepage" target="_blank" rel="noopener">主页 ↗</a>
+                    </div>
+                  </div>
+                </div>
+                <div class="empty" v-else><div class="empty-ic">♡</div><p>该分组还没有收藏达人</p>
+                  <p class="muted">在达人库/筛选中打开详情，可加入收藏</p>
+                  <button class="btn primary" @click="switchView('library')">去达人库</button>
+                </div>
+              </template>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ============ 详情抽屉 ============ -->
+  <div class="drawer-mask" v-if="state.detailOpen" @click="closeDetail"></div>
+  <aside class="drawer" :class="{open: state.detailOpen}" v-if="detailInfluencer">
+    <div class="drawer-head">
+      <div class="drawer-title">
+        <span class="platform-tag" :class="platformClass(detailInfluencer.platform)">{{ detailInfluencer.platform }}</span>
+        <span class="tier-badge" :class="tierClass(detailInfluencer.tier)">{{ detailInfluencer.tier }}</span>
+        <span class="avoid-tag" v-if="detailInfluencer.avoid">避雷</span>
+      </div>
+      <button class="drawer-close" @click="closeDetail">✕</button>
+    </div>
+    <h2 class="drawer-name">{{ detailInfluencer.nickname }}</h2>
+    <div class="drawer-actions">
+      <a v-if="detailInfluencer.homepage" class="btn primary sm" :href="detailInfluencer.homepage" target="_blank" rel="noopener">访问主页 ↗</a>
+      <button class="btn sm" @click="toggleCompare(detailInfluencer.id)" :class="{active: state.compareIds.includes(detailInfluencer.id)}">加入对比</button>
+      <button class="btn sm" @click="toggleListSelect(detailInfluencer.id)" :class="{active: state.listIds.includes(detailInfluencer.id)}">加入清单</button>
+      <button class="btn sm ghost" @click="deleteInfluencer(detailInfluencer.id)">删除</button>
+    </div>
+
+    <!-- 收藏到分组 -->
+    <div class="detail-section">
+      <div class="ds-title">收藏到分组</div>
+      <div class="fav-checks">
+        <label class="fav-check" v-for="g in state.favoriteGroups" :key="g.id">
+          <input type="checkbox" :checked="isFavChecked(g.id, detailInfluencer.id)" @change="toggleFav(g.id, detailInfluencer.id)" />
+          <span>{{ g.name }}</span>
+        </label>
+        <span class="muted" v-if="!state.favoriteGroups.length">暂无分组</span>
+      </div>
+    </div>
+
+    <!-- 基础身份 -->
+    <div class="detail-section">
+      <div class="ds-title">基础身份</div>
+      <div class="ds-grid">
+        <div class="ds-item"><label>达人昵称</label><span>{{ detailInfluencer.nickname || '-' }}</span></div>
+        <div class="ds-item"><label>所属平台</label><span>{{ detailInfluencer.platform || '-' }}</span></div>
+        <div class="ds-item"><label>微信号</label><span>{{ detailInfluencer.wechat || '-' }}</span></div>
+        <div class="ds-item"><label>手机号</label><span>{{ detailInfluencer.phone || '-' }}</span></div>
+        <div class="ds-item"><label>常驻城市</label><span>{{ detailInfluencer.city || '-' }}</span></div>
+        <div class="ds-item"><label>主页链接</label><a v-if="detailInfluencer.homepage" :href="detailInfluencer.homepage" target="_blank" rel="noopener" class="name-link ellipsis">{{ detailInfluencer.homepage }}</a><span v-else>-</span></div>
+      </div>
+    </div>
+
+    <!-- 账号画像 -->
+    <div class="detail-section">
+      <div class="ds-title">账号画像</div>
+      <div class="ds-grid">
+        <div class="ds-item"><label>粉丝量级</label><span>{{ fmtNum(detailInfluencer.followers) }}</span></div>
+        <div class="ds-item"><label>达人层级</label><span>{{ detailInfluencer.tier || '-' }}</span></div>
+        <div class="ds-item"><label>核心赛道</label><span>{{ detailInfluencer.track || '-' }}</span></div>
+        <div class="ds-item"><label>内容风格</label><span>{{ detailInfluencer.style || '-' }}</span></div>
+      </div>
+      <div class="ds-item full"><label>特殊属性</label>
+        <div class="tag-list" v-if="(detailInfluencer.tags||[]).length"><span class="tag" v-for="t in detailInfluencer.tags" :key="t">{{ t }}</span></div>
+        <span v-else>-</span>
+      </div>
+    </div>
+
+    <!-- 商务合作 -->
+    <div class="detail-section">
+      <div class="ds-title">商务合作</div>
+      <div class="ds-grid">
+        <div class="ds-item"><label>水上报价</label><span class="price">{{ fmtPrice(detailInfluencer.pricePublic) }}</span></div>
+        <div class="ds-item"><label>水下报价</label><span class="price">{{ fmtPrice(detailInfluencer.pricePrivate) }}</span></div>
+        <div class="ds-item"><label>合作模式</label><span>{{ detailInfluencer.coopMode || '-' }}</span></div>
+        <div class="ds-item"><label>是否避雷</label><span :class="detailInfluencer.avoid?'avoid-tag':'ok-tag'">{{ detailInfluencer.avoid?'是':'否' }}</span></div>
+      </div>
+      <div class="ds-item full"><label>过往合作案例</label><span>{{ detailInfluencer.cases || '-' }}</span></div>
+      <div class="ds-item full"><label>合作备注</label><span>{{ detailInfluencer.coopNote || '-' }}</span></div>
+    </div>
+
+    <!-- 效果数据 -->
+    <div class="detail-section">
+      <div class="ds-title">效果数据</div>
+      <div class="ds-grid">
+        <div class="ds-item"><label>近30天投稿数</label><span>{{ detailInfluencer.posts30d || '-' }}</span></div>
+        <div class="ds-item"><label>总播放/阅读量</label><span>{{ fmtNum(detailInfluencer.totalViews) }}</span></div>
+        <div class="ds-item"><label>近30天总互动数</label><span>{{ fmtNum(detailInfluencer.interactions30d) }}</span></div>
+        <div class="ds-item"><label>互动率</label><span>{{ fmtPct(detailInfluencer.engagementRate) }}</span></div>
+        <div class="ds-item"><label>成交GMV</label><span class="price">{{ fmtNum(detailInfluencer.gmv) }}</span></div>
+        <div class="ds-item"><label>是否开通蒲公英</label><span v-if="detailInfluencer.pugongyingEnabled" class="tag ok-tag">已开通</span><span v-else class="muted-tag">未开通</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ 对比浮动栏 ============ -->
+  <!-- ============ 批量操作浮动栏 ============ -->
+  <div class="batch-bar" v-if="state.view==='library' && state.selectedIds.length">
+    <div class="bb-info">已选 <strong>{{ state.selectedIds.length }}</strong> 位</div>
+    <div class="bb-gap" v-if="state.influencers.length > filteredInfluencers.length">
+      <span class="bb-outside" title="被筛选条件排除在外（如避雷达人）">
+        库内 {{ state.influencers.length }} · 筛选外 {{ state.influencers.length - filteredInfluencers.length }}
+      </span>
+    </div>
+    <button class="btn sm ghost" @click="toggleSelectAll">{{ isAllSelected ? '取消全选' : '全选当前结果' }}</button>
+    <button class="btn sm ghost" @click="clearSelection">清空选择</button>
+    <button class="btn danger sm" @click="batchDelete">🗑 批量删除</button>
+  </div>
+
+  <!-- ============ 对比浮动栏 ============ -->
+  <div class="compare-bar" v-if="state.compareIds.length && state.view!=='compare'">
+    <div class="cb-info">对比清单 {{ state.compareIds.length }}/4</div>
+    <div class="cb-names">{{ compareList.map(i=>i.nickname).join('、') }}</div>
+    <button class="btn primary sm" @click="switchView('compare')">查看对比 →</button>
+    <button class="btn sm ghost" @click="clearCompare">清空</button>
+  </div>
+
+  <!-- ============ 导入预览对话框 ============ -->
+  <div class="modal-mask" v-if="state.importPreview.open" @click.self="state.importPreview.open=false">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title">导入预览 · 确认字段映射</div>
+          <div class="modal-sub">{{ state.importPreview.fileName }} · 共 {{ state.importPreview.rowCount }} 行数据</div>
+        </div>
+        <button class="drawer-close" @click="state.importPreview.open=false">✕</button>
+      </div>
+      <div class="modal-body">
+        <table class="map-table">
+          <thead>
+            <tr><th style="width:32%">Excel 列名</th><th>首行样例</th><th style="width:30%">映射到系统字段</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="col in state.importPreview.cols" :key="col.index" :class="{ignored: !col.field}">
+              <td class="map-header-name">{{ col.header }}</td>
+              <td class="map-sample">{{ col.sample || '-' }}</td>
+              <td>
+                <select class="input sm" v-model="col.field">
+                  <option value="">— 忽略此列 —</option>
+                  <option v-for="f in fieldOptions" :key="f.key" :value="f.key">{{ f.label }}</option>
+                </select>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="modal-tip">
+          已按表头自动识别，可手动调整。「达人等级」如为 Lv.x/数字级 等非标准格式，将按粉丝量自动推断层级（素人/尾部/腰部/头部/顶流），原值保留到标签；未填平台时按表头/主页链接自动推断。
+        </p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" @click="state.importPreview.open=false">取消</button>
+        <button class="btn primary" @click="confirmImport">✓ 确认导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Toast ============ -->
+  <transition name="toast">
+    <div class="toast" :class="'toast-'+state.toast.type" v-if="state.toast.show">{{ state.toast.text }}</div>
+  </transition>
+
+</div>
+
+<!-- ============ 脚本（本地化，离线可运行） ============ -->
+<script src="vendor/vue.global.prod.js?v=3"></script>
+<script src="vendor/xlsx.full.min.js?v=3"></script>
+<!-- Supabase 云后端（可选：删除这两行自动降级为 localStorage） -->
+<script src="js/supabase-config.js?v=3"></script>
+<script src="js/supabase.js?v=3"></script>
+<script src="js/store.js?v=3"></script>
+<script src="js/excel.js?v=3"></script>
+<script src="js/match.js?v=3"></script>
+<script src="js/app.js?v=3"></script>
+</body>
+</html>
