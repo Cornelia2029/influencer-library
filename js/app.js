@@ -271,31 +271,31 @@
       }
 
       // ---------- 收藏 ----------
-      function addFavoriteGroup() {
+      async function addFavoriteGroup() {
         const name = window.prompt('请输入收藏分组名称：', '项目' + (state.favoriteGroups.length + 1));
         if (!name) return;
-        const g = Store.addFavoriteGroup(name);
-        state.favoriteGroups = Store.getFavorites();
+        const g = await Store.addFavoriteGroup(name);
+        state.favoriteGroups = await Store.getFavorites();
         state.activeFavGroup = g.id;
         toast('已创建分组「' + name + '」', 'success');
       }
-      function deleteFavGroup(id) {
+      async function deleteFavGroup(id) {
         if (!window.confirm('删除该分组？（不会删除达人数据）')) return;
-        Store.deleteFavoriteGroup(id);
-        state.favoriteGroups = Store.getFavorites();
+        await Store.deleteFavoriteGroup(id);
+        state.favoriteGroups = await Store.getFavorites();
         if (state.activeFavGroup === id) state.activeFavGroup = null;
         toast('已删除分组', 'info');
       }
-      function toggleFav(groupId, infId) {
-        Store.toggleFavorite(groupId, infId);
-        state.favoriteGroups = Store.getFavorites();
+      async function toggleFav(groupId, infId) {
+        await Store.toggleFavorite(groupId, infId);
+        state.favoriteGroups = await Store.getFavorites();
       }
-      function isFav(infId) {
+      async function isFav(infId) {
         if (!state.activeFavGroup) return false;
-        return Store.isFavorited(state.activeFavGroup, infId);
+        return await Store.isFavorited(state.activeFavGroup, infId);
       }
-      function isFavChecked(groupId, infId) {
-        return Store.isFavorited(groupId, infId);
+      async function isFavChecked(groupId, infId) {
+        return await Store.isFavorited(groupId, infId);
       }
       function exportFavGroup() {
         const list = favGroupInfluencers.value;
@@ -390,16 +390,16 @@
         }
       }
       // 阶段2：用户确认映射后真正导入
-      function confirmImport() {
+      async function confirmImport() {
         const p = state.importPreview;
         const colMap = {};
         p.cols.forEach(c => { if (c.field) colMap[c.index] = c.field; });
         if (!Object.keys(colMap).length) { toast('请至少为一列指定字段映射', 'warn'); return; }
         const { data, skipped } = ExcelIO.buildInfluencers(p.rows, colMap, p.platformHint, p.headers);
         if (!data.length) { toast('没有有效数据行（需有昵称、联系方式或主页链接）', 'warn'); return; }
-        const stats = Store.upsertInfluencers(data);
-        state.influencers = Store.getInfluencers();
-        state.favoriteGroups = Store.getFavorites();
+        const stats = await Store.upsertInfluencers(data);
+        state.influencers = await Store.getInfluencers();
+        state.favoriteGroups = await Store.getFavorites();
         state.importPreview = { open: false, fileName: '', rowCount: 0, rows: [], cols: [] };
         toast(`导入完成：新增 ${stats.added} 条，更新 ${stats.updated} 条，跳过 ${skipped} 行，库内共 ${stats.total} 条`, 'success');
       }
@@ -440,7 +440,7 @@
         toast(`已选中匹配度前 ${n} 位`, 'success');
       }
 
-      function saveProjectList() {
+      async function saveProjectList() {
         if (!state.listIds.length) { toast('请先选中达人', 'warn'); return; }
         if (!state.projectReq.name.trim()) { toast('请填写项目名称', 'warn'); return; }
         const project = {
@@ -450,8 +450,8 @@
           infIds: state.listIds.slice(),
           createdAt: Date.now()
         };
-        Store.saveProject(project);
-        state.savedProjects = Store.getProjects();
+        await Store.saveProject(project);
+        state.savedProjects = await Store.getProjects();
         toast('已保存推荐清单「' + project.name + '」（' + project.infIds.length + ' 位达人）', 'success');
       }
       function exportProjectList() {
@@ -466,19 +466,19 @@
         switchView('match');
         toast('已载入项目「' + p.name + '」', 'info');
       }
-      function deleteProject(id) {
+      async function deleteProject(id) {
         if (!window.confirm('删除该项目清单？')) return;
-        Store.deleteProject(id);
-        state.savedProjects = Store.getProjects();
+        await Store.deleteProject(id);
+        state.savedProjects = await Store.getProjects();
       }
 
       // ---------- CRUD ----------
-      function deleteInfluencer(id) {
+      async function deleteInfluencer(id) {
         const inf = state.influencers.find(i => i.id === id);
         if (!inf) return;
         if (!window.confirm('确认删除达人「' + (inf.nickname || '未命名') + '」？')) return;
-        Store.deleteInfluencer(id);
-        state.influencers = Store.getInfluencers();
+        await Store.deleteInfluencer(id);
+        state.influencers = await Store.getInfluencers();
         state.compareIds = state.compareIds.filter(x => x !== id);
         state.listIds = state.listIds.filter(x => x !== id);
         state.selectedIds = state.selectedIds.filter(x => x !== id);
@@ -525,13 +525,13 @@
 
         const ids = idsToDelete;
         if (!ids.size) return;
-        const remaining = Store.getInfluencers().filter(i => !ids.has(i.id));
-        Store.saveInfluencers(remaining);
-        const favs = Store.getFavorites();
+        const remaining = (await Store.getInfluencers()).filter(i => !ids.has(i.id));
+        await Store.saveInfluencers(remaining);
+        const favs = await Store.getFavorites();
         favs.forEach(g => { g.infIds = (g.infIds || []).filter(x => !ids.has(x)); });
-        Store.saveFavorites(favs);
-        state.influencers = Store.getInfluencers();
-        state.favoriteGroups = Store.getFavorites();
+        await Store.saveFavorites(favs);
+        state.influencers = await Store.getInfluencers();
+        state.favoriteGroups = await Store.getFavorites();
         state.compareIds = state.compareIds.filter(x => !ids.has(x));
         state.listIds = state.listIds.filter(x => !ids.has(x));
         state.selectedIds = [];
@@ -539,17 +539,17 @@
       }
 
       // 清空达人库（强确认，绕过所有筛选）
-      function clearAllInfluencers() {
+      async function clearAllInfluencers() {
         const total = state.influencers.length;
         if (!total) { toast('库内已无达人', 'info'); return; }
         if (!window.confirm('⚠ 确认清空全部 ' + total + ' 位达人？\n此操作将：\n• 清空达人库所有数据\n• 清空所有收藏分组内的达人引用\n• 已保存的项目清单将失去关联达人\n\n此操作不可撤销！')) return;
         if (!window.confirm('⚠ 再次确认：真的要删除全部 ' + total + ' 位达人吗？\n\n输入 "确定" 点击后将永久清空。')) return;
-        Store.clearInfluencers();
-        const favs = Store.getFavorites();
+        await Store.clearInfluencers();
+        const favs = await Store.getFavorites();
         favs.forEach(g => { g.infIds = []; });
-        Store.saveFavorites(favs);
+        await Store.saveFavorites(favs);
         state.influencers = [];
-        state.favoriteGroups = Store.getFavorites();
+        state.favoriteGroups = await Store.getFavorites();
         state.compareIds = [];
         state.listIds = [];
         state.selectedIds = [];
@@ -557,19 +557,19 @@
       }
 
       // 恢复种子数据（清空库后若想快速恢复示例）
-      function reseedInfluencers() {
+      async function reseedInfluencers() {
         if (state.influencers.length && !window.confirm('当前库内已有达人，追加示例数据可能产生重复。确定继续？')) return;
         // 强制重新注入：先移除种子标记，再注入
         localStorage.removeItem(Store.KEYS.SEED_FLAG);
         // 复用 ensureSeed 逻辑
-        if (Store.isSeeded() || Store.getInfluencers().length > 0) return;
+        if (Store.isSeeded() || (await Store.getInfluencers()).length > 0) return;
         const seed = buildSeedData();
-        Store.upsertInfluencers(seed);
+        await Store.upsertInfluencers(seed);
         Store.markSeeded();
-        Store.addFavoriteGroup('意向客户');
-        Store.addFavoriteGroup('备选池');
-        state.influencers = Store.getInfluencers();
-        state.favoriteGroups = Store.getFavorites();
+        await Store.addFavoriteGroup('意向客户');
+        await Store.addFavoriteGroup('备选池');
+        state.influencers = await Store.getInfluencers();
+        state.favoriteGroups = await Store.getFavorites();
         toast('已追加示例达人 ' + seed.length + ' 位', 'success');
       }
 
